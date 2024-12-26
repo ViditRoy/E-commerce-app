@@ -1,16 +1,25 @@
 import json
+import logging
 from kafka import KafkaConsumer
 import psycopg2
 from psycopg2.extras import execute_values
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # Connect to PostgreSQL
-conn = psycopg2.connect(
-    dbname="ecommerce",
-    user="postgres",
-    password="password",
-    host="localhost"
-)
-cursor = conn.cursor()
+try:
+    conn = psycopg2.connect(
+        dbname="ecommerce",
+        user="postgres",
+        password="password",
+        host="localhost"
+    )
+    cursor = conn.cursor()
+except psycopg2.Error as e:
+    logger.error(f"Error connecting to PostgreSQL: {e}")
+    raise
 
 # Create table for transactions
 cursor.execute("""
@@ -32,11 +41,35 @@ consumer = KafkaConsumer(
 )
 
 # Process data and store in DB
-for message in consumer:
-    transaction = message.value
-    cursor.execute(
-        "INSERT INTO transactions (user_id, product_id, price, timestamp) VALUES (%s, %s, %s, to_timestamp(%s))",
-        (transaction['user_id'], transaction['product_id'], transaction['price'], transaction['timestamp'])
-    )
-    conn.commit()
-    print(f"Stored: {transaction}")
+def process_messages(batch_size=100):
+    buffer = []
+    for message in consumer:
+        transaction = message.value
+        buffer.append((
+            transaction['user_id'],
+            transaction['product_id'],
+            transaction['price'],
+            transaction['timestamp']
+        ))
+
+        if len(buffer) >= batch_size:
+            try:
+                execute_values(cursor, """
+                    INSERT INTO transactions (user_id, product_id, price, timestamp)
+                    VALUES %s
+                """, buffer, template=None, page_size=batch_size)
+                conn.commit()
+                logger.info(f"Stored batch of {len(buffer)} transactions")
+                buffer.clear()
+            except psycopg2.Error as e:
+                logger.error(f"Error storing transactions: {e}")
+                conn.rollback()
+
+if __name__ == "__main__":
+    try:
+        process_messages()
+    except KeyboardInterrupt:
+        logger.info("Shutting down consumer...")
+    finally:
+        cursor.close()
+        conn.close()

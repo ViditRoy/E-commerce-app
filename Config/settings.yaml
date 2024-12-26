@@ -1,0 +1,9 @@
+database:
+  name: ecommerce
+  user: postgres
+  password: password
+  host: localhost
+
+kafka:
+  bootstrap_servers: localhost:9092
+  topic: transactions

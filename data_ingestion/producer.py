@@ -1,7 +1,13 @@
 import random
 import time
 import json
+import logging
 from kafka import KafkaProducer
+from kafka.errors import KafkaError
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Kafka Producer setup
 producer = KafkaProducer(
@@ -19,8 +25,15 @@ def generate_transaction():
     }
 
 # Send transactions to Kafka topic
-while True:
-    transaction = generate_transaction()
-    producer.send('transactions', value=transaction)
-    print(f"Sent: {transaction}")
-    time.sleep(1)
+def send_transactions(interval=1):
+    while True:
+        transaction = generate_transaction()
+        try:
+            producer.send('transactions', value=transaction).get(timeout=10)
+            logger.info(f"Sent: {transaction}")
+        except KafkaError as e:
+            logger.error(f"Failed to send transaction: {e}")
+        time.sleep(interval)
+
+if __name__ == "__main__":
+    send_transactions()
